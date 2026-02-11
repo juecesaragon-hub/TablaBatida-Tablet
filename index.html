@@ -175,12 +175,6 @@ const camVideo = document.getElementById("camVideo");
 const playVideo = document.getElementById("playVideo");
 const canvas = document.getElementById("graphCanvas");
 const ctx = canvas.getContext("2d");
-function resizeCanvas(){
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
-}
-resizeCanvas();
-window.addEventListener("resize", resizeCanvas);
 const fileList = document.getElementById("fileList");
 const peakLabel = document.getElementById("peakTime");
 
@@ -201,11 +195,6 @@ const cameraSelect = document.getElementById("cameraSelect");
 let devices = []; // lista de cámaras
 
 let stream = null; // ⬅️ Mover arriba
-let dragging = false;
-let liveStartTime = 0;
-let maxLiveDuration = 10000; // 10 segundos visibles en el gráfico
-let draggingOrange = false;
-let orangeX = 0; // posición actual de la barra naranja en píxeles
 
 /* ===== CRUCETA ===== */
 const crosshair = document.querySelector(".crosshair");
@@ -257,7 +246,7 @@ resetCounterBtn.onclick = () => {
 /* ===== ANALIZADOR EN VIVO ===== */
 let liveCanvas = document.createElement("canvas");
 liveCanvas.width = 96; liveCanvas.height = 54;
-let liveCtx = liveCanvas.getContext("2d");
+let liveCtx = liveCanvas.getContext("2d", { willReadFrequently: true });
 let liveTimer = null;
 let sampleInterval = 120;
 
@@ -323,47 +312,30 @@ frameBackBtn.onclick    = () => frameStep(-1);
 frameForwardBtn.onclick = () => frameStep(1);
 
 /* ===== WEBCAM ===== */
+/* ===== WEBCAM ===== */
 camBtn.onclick = async () => {
     try {
-        // Si ya está activa → apagar
+        // Si ya hay un stream, lo cerramos
         if (stream) {
             stream.getTracks().forEach(t => t.stop());
             camVideo.srcObject = null;
             stream = null;
-            camBtn.style.background = "";
+            camBtn.style.background = ""; // Volver al color original
             return;
         }
 
-        // Forzar cámara trasera en tablet
-        stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: { exact: "environment" } // 👈 cámara trasera
-            },
-            audio: false
-        });
-
+        // Solicita permiso y obtiene la cámara por defecto
+stream = await navigator.mediaDevices.getUserMedia({ 
+    video: { facingMode: { exact: "environment" } } 
+});
         camVideo.srcObject = stream;
-        await camVideo.play();
 
+        // Cambiar el color del botón a naranja al activarse
         camBtn.style.background = "orange";
 
     } catch (err) {
-
-        // Si exact falla (algunas tablets viejas)
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: "environment" },
-                audio: false
-            });
-
-            camVideo.srcObject = stream;
-            await camVideo.play();
-            camBtn.style.background = "orange";
-
-        } catch (err2) {
-            alert("No se pudo acceder a la cámara trasera: " + err2.message);
-            console.error(err2);
-        }
+        alert("No se pudo acceder a la cámara: " + err.message);
+        console.error(err);
     }
 };
 
@@ -424,7 +396,6 @@ recorder.onstop = async () => {
     recorder.start();
     recording = true;
     recStart = performance.now();
-liveStartTime = performance.now();
     recTimeBox.style.display = "block";
     recTimer = setInterval(() => {
         recClock.textContent = formatTime(performance.now() - recStart);
@@ -464,9 +435,11 @@ saveBtn.onclick = () => {
 /* ===== ANÁLISIS ===== */
 /* ===== ANALIZADOR EN VIVO con requestVideoFrameCallback ===== */
 let liveRunning = false;
-function analyzeLiveFrame() {
+
+function analyzeLiveFrame(now, metadata) {
     if (!stream) return;
 
+    // Dibujar el frame actual
     liveCtx.drawImage(camVideo, 0, 0, liveCanvas.width, liveCanvas.height);
 
     const d = liveCtx.getImageData(0,0,liveCanvas.width,liveCanvas.height).data;
@@ -474,35 +447,36 @@ function analyzeLiveFrame() {
     const n = d.length / 4;
 
     for (let i = 0; i < d.length; i += 4) {
-        r += d[i];
-        g += d[i+1];
-        b += d[i+2];
+        r += d[i]; g += d[i+1]; b += d[i+2];
         lum += 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
     }
 
-    lum /= n;
-    r /= n;
-    g /= n;
-    b /= n;
+    lum /= n; r/=n; g/=n; b/=n;
 
     if (lastLum != null) {
-        diffs.push(Math.abs(lum - lastLum) +
-                   Math.hypot(r-lastColor[0], g-lastColor[1], b-lastColor[2]) * 0.5);
-
+        diffs.push(Math.abs(lum - lastLum) + Math.hypot(r-lastColor[0], g-lastColor[1], b-lastColor[2]) * 0.5);
         smoothDiffs = smooth(diffs, 3);
         recomputePeak();
     }
 
     lastLum = lum;
     lastColor = [r,g,b];
+
+    // Solicitar el siguiente frame
+    if (liveRunning) {
+        camVideo.requestVideoFrameCallback(analyzeLiveFrame);
+    }
 }
 
 function startLiveAnalysis() {
-    liveTimer = setInterval(analyzeLiveFrame, sampleInterval);
+    if (!liveRunning) {
+        liveRunning = true;
+        camVideo.requestVideoFrameCallback(analyzeLiveFrame);
+    }
 }
 
 function stopLiveAnalysis() {
-    clearInterval(liveTimer);
+    liveRunning = false;
 }
 
 /* ===== PICO ===== */
@@ -524,87 +498,45 @@ function recomputePeak(){
 }
 
 /* ===== GRAFICO ===== */
-function draw() {
+function draw(){
     requestAnimationFrame(draw);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(!smoothDiffs.length) return;
     const h = canvas.height;
 
-    if (!smoothDiffs.length) return;
-
-    // ===== CURVA AZUL =====
+    // curva azul
     ctx.beginPath();
-    smoothDiffs.forEach((d, i) => {
-        const x = i / smoothDiffs.length * canvas.width;
-        const y = h - (Math.pow(d, sensitivity) / maxDiff) * h;
-        ctx.lineTo(x, y);
+    smoothDiffs.forEach((d,i)=>{
+        const x=i/smoothDiffs.length*canvas.width;
+        const y=h-(Math.pow(d,sensitivity)/maxDiff)*h;
+        ctx.lineTo(x,y);
     });
-    ctx.strokeStyle = "#007bff";
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    ctx.strokeStyle="#007bff"; ctx.lineWidth=3; ctx.stroke();
 
-    // ===== BARRA ROJA = PICO =====
+    // barra roja = pico
     const px = peakIndex / smoothDiffs.length * canvas.width;
-    ctx.strokeStyle = "red";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(px, 0);
-    ctx.lineTo(px, h);
-    ctx.stroke();
+    ctx.strokeStyle="red"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,h); ctx.stroke();
 
-// ===== BARRA NARANJA = TIEMPO ACTUAL / INTERACTIVA =====
+// barra naranja = tiempo actual del video
 let tx = 0;
-
-if (draggingOrange) {
-    tx = orangeX; // sigue al cursor
-} else if (recording && smoothDiffs.length) {
-    // Barra naranja en vivo
-    const elapsed = performance.now() - liveStartTime;
-    const totalSamples = smoothDiffs.length;
-    const maxSamples = maxLiveDuration / sampleInterval;
-    tx = Math.min(totalSamples / maxSamples, 1) * canvas.width;
-    orangeX = tx; // actualizar posición
-} else if (playVideo.duration) {
+if(playVideo.duration) {
     tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
-    orangeX = tx;
 }
-
 ctx.strokeStyle = "orange";
 ctx.lineWidth = 2;
 ctx.beginPath();
 ctx.moveTo(tx, 0);
 ctx.lineTo(tx, h);
 ctx.stroke();
+
 }
 draw();
 
 /* ===== INTERACCIÓN GRAFICO ===== */
-canvas.onmousedown = e => {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    // Si está cerca de la barra naranja (5 px)
-    if(Math.abs(x - orangeX) < 5){
-        draggingOrange = true;
-    } else {
-        // clic normal → saltar al pico rojo
-        if(smoothDiffs.length && playVideo.duration){
-            playVideo.currentTime = (peakIndex / smoothDiffs.length) * playVideo.duration;
-        }
-    }
-};
-
-window.onmousemove = e => {
-    if (!draggingOrange) return;
-    const rect = canvas.getBoundingClientRect();
-    orangeX = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
-
-    if(playVideo.duration){
-        playVideo.currentTime = (orangeX / rect.width) * playVideo.duration;
-    }
-};
-
-window.onmouseup = e => draggingOrange = false;
+canvas.onmousedown = e=>{ dragging=true; autoFollow=false; moveGraph(e); };
+window.onmousemove = e=>dragging && moveGraph(e);
+window.onmouseup = ()=>dragging=false;
 function moveGraph(e){
     if(!playVideo.duration) return;
     autoFollow = false; // desactiva autoFollow al mover el gráfico
@@ -612,13 +544,7 @@ function moveGraph(e){
     const x = Math.min(Math.max(e.clientX - r.left,0), r.width);
     playVideo.currentTime = (x / r.width) * playVideo.duration;
 }
-canvas.ondblclick = e => {
-    if(!smoothDiffs.length || !playVideo.duration) return;
-    playVideo.currentTime = (peakIndex / smoothDiffs.length) * playVideo.duration;
-    // también actualizar barra naranja inmediatamente
-    const rect = canvas.getBoundingClientRect();
-    orangeX = (peakIndex / smoothDiffs.length) * rect.width;
-};
+canvas.ondblclick = ()=>{ if(!playVideo.duration || !smoothDiffs.length) return; playVideo.currentTime = (peakIndex/smoothDiffs.length)*playVideo.duration; };
 
 /* ===== LISTA DE ARCHIVOS ===== */
 function addToList(v){
