@@ -136,7 +136,7 @@ select{height:32px}
   </select>
   <input id="crossSize" type="range" min="1" max="5" value="2">
   <span id="crossSizeVal">2 px</span>
-<select id="cameraSelect"></select>
+
   <button id="camBtn" class="control-btn">📷</button>
   <button id="recBtn" class="control-btn">⏺</button>
 <span id="counterDisplay" title="Próximo video"
@@ -312,49 +312,22 @@ frameBackBtn.onclick    = () => frameStep(-1);
 frameForwardBtn.onclick = () => frameStep(1);
 
 /* ===== WEBCAM ===== */
-/* ===== WEBCAM TABLET + USB FIX DEFINITIVO ===== */
-
-let currentDeviceId = null;
-
-async function initCameraSystem() {
+camBtn.onclick = async () => {
     try {
-        // 1️⃣ Pedir permiso primero (OBLIGATORIO en tablet)
-        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        tempStream.getTracks().forEach(t => t.stop());
-
-        // 2️⃣ Ahora sí podemos enumerar dispositivos
-        const allDevices = await navigator.mediaDevices.enumerateDevices();
-console.log("TODOS LOS DISPOSITIVOS:", allDevices);
-        const videoDevices = allDevices.filter(d => d.kind === "videoinput");
-
-        cameraSelect.innerHTML = "";
-
-        videoDevices.forEach((device, i) => {
-            const option = document.createElement("option");
-            option.value = device.deviceId;
-            option.textContent = device.label || `Cámara ${i+1}`;
-            cameraSelect.appendChild(option);
-        });
-
-        // Seleccionar primera cámara por defecto
-        if (videoDevices.length > 0) {
-            currentDeviceId = videoDevices[0].deviceId;
-            cameraSelect.value = currentDeviceId;
-        }
-
-    } catch (err) {
-        alert("No se pudo acceder a la cámara: " + err.message);
-    }
-}
-
-async function startCamera(deviceId) {
-    try {
+        // Si ya está activa → apagar
         if (stream) {
             stream.getTracks().forEach(t => t.stop());
+            camVideo.srcObject = null;
+            stream = null;
+            camBtn.style.background = "";
+            return;
         }
 
+        // Forzar cámara trasera en tablet
         stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: deviceId } },
+            video: {
+                facingMode: { exact: "environment" } // 👈 cámara trasera
+            },
             audio: false
         });
 
@@ -364,38 +337,22 @@ async function startCamera(deviceId) {
         camBtn.style.background = "orange";
 
     } catch (err) {
-        alert("Error iniciando cámara: " + err.message);
-    }
-}
 
-camBtn.onclick = async () => {
+        // Si exact falla (algunas tablets viejas)
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment" },
+                audio: false
+            });
 
-    // Si la cámara NO está activa
-    if (!stream) {
+            camVideo.srcObject = stream;
+            await camVideo.play();
+            camBtn.style.background = "orange";
 
-        // Si aún no hemos inicializado el sistema
-        if (!cameraSelect.options.length) {
-            await initCameraSystem();
+        } catch (err2) {
+            alert("No se pudo acceder a la cámara trasera: " + err2.message);
+            console.error(err2);
         }
-
-        if (currentDeviceId) {
-            await startCamera(currentDeviceId);
-        }
-
-    } else {
-        // Apagar cámara
-        stream.getTracks().forEach(t => t.stop());
-        camVideo.srcObject = null;
-        stream = null;
-        camBtn.style.background = "";
-    }
-};
-
-cameraSelect.onchange = async () => {
-    currentDeviceId = cameraSelect.value;
-
-    if (stream) {
-        await startCamera(currentDeviceId);
     }
 };
 
@@ -428,17 +385,7 @@ function startRec() {
     recording = true;
     updateCounterDisplay();  // ahora muestra 01 en la primera grabación
 
-let options = {};
-
-if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
-    options.mimeType = "video/webm;codecs=vp9";
-} else if (MediaRecorder.isTypeSupported("video/webm")) {
-    options.mimeType = "video/webm";
-} else if (MediaRecorder.isTypeSupported("video/mp4")) {
-    options.mimeType = "video/mp4";
-}
-
-recorder = new MediaRecorder(stream, options);
+    recorder = new MediaRecorder(stream);
     recorder.ondataavailable = e => chunks.push(e.data);
 recorder.onstop = async () => {
     if (!chunks.length) return;
@@ -604,37 +551,14 @@ ctx.stroke();
 draw();
 
 /* ===== INTERACCIÓN GRAFICO ===== */
-let dragging = false;
-
-function getEventX(e) {
-    if (e.touches) return e.touches[0].clientX;
-    return e.clientX;
-}
-
-canvas.addEventListener("mousedown", e => {
-    dragging = true;
-    autoFollow = false;
-    moveGraph(e);
-});
-
-canvas.addEventListener("touchstart", e => {
-    dragging = true;
-    autoFollow = false;
-    moveGraph(e);
-});
-
-window.addEventListener("mousemove", e => dragging && moveGraph(e));
-window.addEventListener("touchmove", e => dragging && moveGraph(e));
-
-window.addEventListener("mouseup", () => dragging = false);
-window.addEventListener("touchend", () => dragging = false);
-
-function moveGraph(e) {
-    if (!playVideo.duration) return;
-
+canvas.onmousedown = e=>{ dragging=true; autoFollow=false; moveGraph(e); };
+window.onmousemove = e=>dragging && moveGraph(e);
+window.onmouseup = ()=>dragging=false;
+function moveGraph(e){
+    if(!playVideo.duration) return;
+    autoFollow = false; // desactiva autoFollow al mover el gráfico
     const r = canvas.getBoundingClientRect();
-    const x = Math.min(Math.max(getEventX(e) - r.left, 0), r.width);
-
+    const x = Math.min(Math.max(e.clientX - r.left,0), r.width);
     playVideo.currentTime = (x / r.width) * playVideo.duration;
 }
 canvas.ondblclick = ()=>{ if(!playVideo.duration || !smoothDiffs.length) return; playVideo.currentTime = (peakIndex/smoothDiffs.length)*playVideo.duration; };
