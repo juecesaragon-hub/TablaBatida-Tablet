@@ -204,6 +204,8 @@ let stream = null; // ⬅️ Mover arriba
 let dragging = false;
 let liveStartTime = 0;
 let maxLiveDuration = 10000; // 10 segundos visibles en el gráfico
+let draggingOrange = false;
+let orangeX = 0; // posición actual de la barra naranja en píxeles
 
 /* ===== CRUCETA ===== */
 const crosshair = document.querySelector(".crosshair");
@@ -525,9 +527,9 @@ function recomputePeak(){
 function draw() {
     requestAnimationFrame(draw);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const h = canvas.height;
 
     if (!smoothDiffs.length) return;
-    const h = canvas.height;
 
     // ===== CURVA AZUL =====
     ctx.beginPath();
@@ -549,31 +551,60 @@ function draw() {
     ctx.lineTo(px, h);
     ctx.stroke();
 
-    // ===== BARRA NARANJA = TIEMPO ACTUAL =====
-    let tx = 0;
+// ===== BARRA NARANJA = TIEMPO ACTUAL / INTERACTIVA =====
+let tx = 0;
 
-    if (recording && smoothDiffs.length) {
-        // La barra naranja avanza según la cantidad de muestras procesadas
-        tx = (smoothDiffs.length / (maxLiveDuration / sampleInterval)) * canvas.width;
-        if (tx > canvas.width) tx = canvas.width; // limitar al canvas
-    } else if (playVideo.duration) {
-        // Reproducción de video
-        tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
-    }
+if (draggingOrange) {
+    tx = orangeX; // sigue al cursor
+} else if (recording && smoothDiffs.length) {
+    // Barra naranja en vivo
+    const elapsed = performance.now() - liveStartTime;
+    const totalSamples = smoothDiffs.length;
+    const maxSamples = maxLiveDuration / sampleInterval;
+    tx = Math.min(totalSamples / maxSamples, 1) * canvas.width;
+    orangeX = tx; // actualizar posición
+} else if (playVideo.duration) {
+    tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
+    orangeX = tx;
+}
 
-    ctx.strokeStyle = "orange";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(tx, 0);
-    ctx.lineTo(tx, h);
-    ctx.stroke();
+ctx.strokeStyle = "orange";
+ctx.lineWidth = 2;
+ctx.beginPath();
+ctx.moveTo(tx, 0);
+ctx.lineTo(tx, h);
+ctx.stroke();
 }
 draw();
 
 /* ===== INTERACCIÓN GRAFICO ===== */
-canvas.onmousedown = e=>{ dragging=true; autoFollow=false; moveGraph(e); };
-window.onmousemove = e=>dragging && moveGraph(e);
-window.onmouseup = ()=>dragging=false;
+canvas.onmousedown = e => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Si está cerca de la barra naranja (5 px)
+    if(Math.abs(x - orangeX) < 5){
+        draggingOrange = true;
+    } else {
+        // clic normal → saltar al pico rojo
+        if(smoothDiffs.length && playVideo.duration){
+            playVideo.currentTime = (peakIndex / smoothDiffs.length) * playVideo.duration;
+        }
+    }
+};
+
+window.onmousemove = e => {
+    if (!draggingOrange) return;
+    const rect = canvas.getBoundingClientRect();
+    orangeX = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
+
+    if(playVideo.duration){
+        playVideo.currentTime = (orangeX / rect.width) * playVideo.duration;
+    }
+};
+
+window.onmouseup = e => draggingOrange = false;
 function moveGraph(e){
     if(!playVideo.duration) return;
     autoFollow = false; // desactiva autoFollow al mover el gráfico
@@ -581,7 +612,13 @@ function moveGraph(e){
     const x = Math.min(Math.max(e.clientX - r.left,0), r.width);
     playVideo.currentTime = (x / r.width) * playVideo.duration;
 }
-canvas.ondblclick = ()=>{ if(!playVideo.duration || !smoothDiffs.length) return; playVideo.currentTime = (peakIndex/smoothDiffs.length)*playVideo.duration; };
+canvas.ondblclick = e => {
+    if(!smoothDiffs.length || !playVideo.duration) return;
+    playVideo.currentTime = (peakIndex / smoothDiffs.length) * playVideo.duration;
+    // también actualizar barra naranja inmediatamente
+    const rect = canvas.getBoundingClientRect();
+    orangeX = (peakIndex / smoothDiffs.length) * rect.width;
+};
 
 /* ===== LISTA DE ARCHIVOS ===== */
 function addToList(v){
