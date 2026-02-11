@@ -521,7 +521,14 @@ function draw(){
 // barra naranja = tiempo actual del video
 let tx = 0;
 if(playVideo.duration) {
-    tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
+    if (autoFollow && smoothDiffs.length) {
+        // autoFollow = true: la barra naranja sigue al pico
+        tx = (peakIndex / smoothDiffs.length) * canvas.width;
+        playVideo.currentTime = (peakIndex / smoothDiffs.length) * playVideo.duration;
+    } else {
+        // de lo contrario, sigue el tiempo actual
+        tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
+    }
 }
 ctx.strokeStyle = "orange";
 ctx.lineWidth = 2;
@@ -544,7 +551,11 @@ function moveGraph(e){
     const x = Math.min(Math.max(e.clientX - r.left,0), r.width);
     playVideo.currentTime = (x / r.width) * playVideo.duration;
 }
-canvas.ondblclick = ()=>{ if(!playVideo.duration || !smoothDiffs.length) return; playVideo.currentTime = (peakIndex/smoothDiffs.length)*playVideo.duration; };
+canvas.ondblclick = () => {
+    if(!playVideo.duration || !smoothDiffs.length) return;
+    autoFollow = true; // para que la barra naranja se sincronice con el pico
+    playVideo.currentTime = (peakIndex/smoothDiffs.length)*playVideo.duration;
+};
 
 /* ===== LISTA DE ARCHIVOS ===== */
 function addToList(v){
@@ -601,6 +612,7 @@ playVideo.onloadedmetadata = () => {
     if (playVideo.duration && smoothDiffs.length) {
         playVideo.currentTime = (peakIndex / smoothDiffs.length) * playVideo.duration;
         playVideo.pause();                // Pausa el video
+tx = (peakIndex / smoothDiffs.length) * canvas.width;
         playPauseBtn.textContent = "▶️"; // Actualiza botón a reproducir
     }
 
