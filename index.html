@@ -324,6 +324,7 @@ async function initCameraSystem() {
 
         // 2️⃣ Ahora sí podemos enumerar dispositivos
         const allDevices = await navigator.mediaDevices.enumerateDevices();
+console.log("TODOS LOS DISPOSITIVOS:", allDevices);
         const videoDevices = allDevices.filter(d => d.kind === "videoinput");
 
         cameraSelect.innerHTML = "";
