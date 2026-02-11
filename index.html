@@ -115,7 +115,7 @@ select{height:32px}
 <div id="main">
   <div id="left">
     <div class="video-box">
-      <video id="camVideo" muted autoplay></video>
+<video id="camVideo" muted autoplay playsinline></video>
       <div class="crosshair"></div>
     </div>
   </div>
@@ -136,7 +136,7 @@ select{height:32px}
   </select>
   <input id="crossSize" type="range" min="1" max="5" value="2">
   <span id="crossSizeVal">2 px</span>
-
+<select id="cameraSelect"></select>
   <button id="camBtn" class="control-btn">📷</button>
   <button id="recBtn" class="control-btn">⏺</button>
 <span id="counterDisplay" title="Próximo video"
@@ -191,6 +191,11 @@ const playPauseBtn = document.getElementById("playPauseBtn");
 const frameBackBtn = document.getElementById("frameBackBtn");
 const frameForwardBtn = document.getElementById("frameForwardBtn");
 
+const cameraSelect = document.getElementById("cameraSelect");
+let devices = []; // lista de cámaras
+
+let stream = null; // ⬅️ Mover arriba
+
 /* ===== CRUCETA ===== */
 const crosshair = document.querySelector(".crosshair");
 const crossColor = document.getElementById("crossColor");
@@ -207,7 +212,7 @@ crossSize.oninput = updateCrosshair;
 updateCrosshair();
 
 /* ===== ESTADO ===== */
-let stream = null, recorder = null, chunks = [], recording = false;
+let recorder = null, chunks = [], recording = false;
 let diffs = [], smoothDiffs = [], maxDiff = 1, peakIndex = 0;
 let sensitivity = 1;
 let lastLum = null, lastColor = null;
@@ -307,23 +312,66 @@ frameBackBtn.onclick    = () => frameStep(-1);
 frameForwardBtn.onclick = () => frameStep(1);
 
 /* ===== WEBCAM ===== */
-camBtn.onclick = async () => {
+/* ===== WEBCAM MEJORADA PARA TABLET + USB ===== */
+
+const cameraSelect = document.getElementById("cameraSelect");
+let devices = [];
+let currentDeviceId = null;
+
+async function loadCameras() {
+    const allDevices = await navigator.mediaDevices.enumerateDevices();
+    devices = allDevices.filter(d => d.kind === "videoinput");
+
+    cameraSelect.innerHTML = "";
+
+    devices.forEach((device, i) => {
+        const option = document.createElement("option");
+        option.value = device.deviceId;
+        option.textContent = device.label || `Cámara ${i+1}`;
+        cameraSelect.appendChild(option);
+    });
+}
+
+async function startCamera(deviceId = null) {
     if (stream) {
         stream.getTracks().forEach(t => t.stop());
-        camVideo.srcObject = null;
-        stream = null;
-        camBtn.style.background = "";
-        return;
     }
+
+    const constraints = {
+        video: deviceId
+            ? { deviceId: { exact: deviceId } }
+            : { facingMode: "environment" } // intenta trasera en tablet
+    };
+
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    camVideo.srcObject = stream;
+
+    camVideo.setAttribute("playsinline", true); // 🔥 clave para iPad
+    await camVideo.play();
+
+    camBtn.style.background = "orange";
+}
+
+camBtn.onclick = async () => {
     try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        camVideo.srcObject = stream;
-        camBtn.style.background = "orange";
-    } catch (e) {
-        alert("No se pudo acceder a la cámara");
+        if (!stream) {
+            await startCamera(currentDeviceId);
+            await loadCameras(); // cargar nombres después del permiso
+        } else {
+            stream.getTracks().forEach(t => t.stop());
+            camVideo.srcObject = null;
+            stream = null;
+            camBtn.style.background = "";
+        }
+    } catch (err) {
+        alert("Error accediendo a la cámara: " + err.message);
     }
 };
 
+cameraSelect.onchange = async () => {
+    currentDeviceId = cameraSelect.value;
+    await startCamera(currentDeviceId);
+};
 /* ===== GRABACIÓN ===== */
 let recStart, recTimer;
 
@@ -353,7 +401,17 @@ function startRec() {
     recording = true;
     updateCounterDisplay();  // ahora muestra 01 en la primera grabación
 
-    recorder = new MediaRecorder(stream);
+let options = {};
+
+if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
+    options.mimeType = "video/webm;codecs=vp9";
+} else if (MediaRecorder.isTypeSupported("video/webm")) {
+    options.mimeType = "video/webm";
+} else if (MediaRecorder.isTypeSupported("video/mp4")) {
+    options.mimeType = "video/mp4";
+}
+
+recorder = new MediaRecorder(stream, options);
     recorder.ondataavailable = e => chunks.push(e.data);
 recorder.onstop = async () => {
     if (!chunks.length) return;
@@ -402,8 +460,10 @@ function stopRec() {
     stopLiveAnalysis();
     recTimeBox.style.display = "none";
     recBtn.style.background = "";
-    counterDisplay.style.color = "#333"; // ✅ volver al color original
+    counterDisplay.style.color = "#333"; // volver al color original
     autoFollow = false;
+
+    // ❌ No detener la cámara aquí
 }
 
 /* ===== BOTÓN PRINCIPAL DE GUARDAR ===== */
@@ -517,9 +577,39 @@ ctx.stroke();
 draw();
 
 /* ===== INTERACCIÓN GRAFICO ===== */
-canvas.onmousedown = e=>{ dragging=true; autoFollow=false; moveGraph(e); };
-window.onmousemove = e=>dragging && moveGraph(e);
-window.onmouseup = ()=>dragging=false;
+let dragging = false;
+
+function getEventX(e) {
+    if (e.touches) return e.touches[0].clientX;
+    return e.clientX;
+}
+
+canvas.addEventListener("mousedown", e => {
+    dragging = true;
+    autoFollow = false;
+    moveGraph(e);
+});
+
+canvas.addEventListener("touchstart", e => {
+    dragging = true;
+    autoFollow = false;
+    moveGraph(e);
+});
+
+window.addEventListener("mousemove", e => dragging && moveGraph(e));
+window.addEventListener("touchmove", e => dragging && moveGraph(e));
+
+window.addEventListener("mouseup", () => dragging = false);
+window.addEventListener("touchend", () => dragging = false);
+
+function moveGraph(e) {
+    if (!playVideo.duration) return;
+
+    const r = canvas.getBoundingClientRect();
+    const x = Math.min(Math.max(getEventX(e) - r.left, 0), r.width);
+
+    playVideo.currentTime = (x / r.width) * playVideo.duration;
+}
 function moveGraph(e){
     if(!playVideo.duration) return;
     autoFollow = false; // desactiva autoFollow al mover el gráfico
