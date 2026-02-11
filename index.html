@@ -312,66 +312,92 @@ frameBackBtn.onclick    = () => frameStep(-1);
 frameForwardBtn.onclick = () => frameStep(1);
 
 /* ===== WEBCAM ===== */
-/* ===== WEBCAM MEJORADA PARA TABLET + USB ===== */
+/* ===== WEBCAM TABLET + USB FIX DEFINITIVO ===== */
 
-const cameraSelect = document.getElementById("cameraSelect");
-let devices = [];
 let currentDeviceId = null;
 
-async function loadCameras() {
-    const allDevices = await navigator.mediaDevices.enumerateDevices();
-    devices = allDevices.filter(d => d.kind === "videoinput");
+async function initCameraSystem() {
+    try {
+        // 1️⃣ Pedir permiso primero (OBLIGATORIO en tablet)
+        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        tempStream.getTracks().forEach(t => t.stop());
 
-    cameraSelect.innerHTML = "";
+        // 2️⃣ Ahora sí podemos enumerar dispositivos
+        const allDevices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = allDevices.filter(d => d.kind === "videoinput");
 
-    devices.forEach((device, i) => {
-        const option = document.createElement("option");
-        option.value = device.deviceId;
-        option.textContent = device.label || `Cámara ${i+1}`;
-        cameraSelect.appendChild(option);
-    });
+        cameraSelect.innerHTML = "";
+
+        videoDevices.forEach((device, i) => {
+            const option = document.createElement("option");
+            option.value = device.deviceId;
+            option.textContent = device.label || `Cámara ${i+1}`;
+            cameraSelect.appendChild(option);
+        });
+
+        // Seleccionar primera cámara por defecto
+        if (videoDevices.length > 0) {
+            currentDeviceId = videoDevices[0].deviceId;
+            cameraSelect.value = currentDeviceId;
+        }
+
+    } catch (err) {
+        alert("No se pudo acceder a la cámara: " + err.message);
+    }
 }
 
-async function startCamera(deviceId = null) {
-    if (stream) {
-        stream.getTracks().forEach(t => t.stop());
+async function startCamera(deviceId) {
+    try {
+        if (stream) {
+            stream.getTracks().forEach(t => t.stop());
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: deviceId } },
+            audio: false
+        });
+
+        camVideo.srcObject = stream;
+        await camVideo.play();
+
+        camBtn.style.background = "orange";
+
+    } catch (err) {
+        alert("Error iniciando cámara: " + err.message);
     }
-
-    const constraints = {
-        video: deviceId
-            ? { deviceId: { exact: deviceId } }
-            : { facingMode: "environment" } // intenta trasera en tablet
-    };
-
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    camVideo.srcObject = stream;
-
-    camVideo.setAttribute("playsinline", true); // 🔥 clave para iPad
-    await camVideo.play();
-
-    camBtn.style.background = "orange";
 }
 
 camBtn.onclick = async () => {
-    try {
-        if (!stream) {
-            await startCamera(currentDeviceId);
-            await loadCameras(); // cargar nombres después del permiso
-        } else {
-            stream.getTracks().forEach(t => t.stop());
-            camVideo.srcObject = null;
-            stream = null;
-            camBtn.style.background = "";
+
+    // Si la cámara NO está activa
+    if (!stream) {
+
+        // Si aún no hemos inicializado el sistema
+        if (!cameraSelect.options.length) {
+            await initCameraSystem();
         }
-    } catch (err) {
-        alert("Error accediendo a la cámara: " + err.message);
+
+        if (currentDeviceId) {
+            await startCamera(currentDeviceId);
+        }
+
+    } else {
+        // Apagar cámara
+        stream.getTracks().forEach(t => t.stop());
+        camVideo.srcObject = null;
+        stream = null;
+        camBtn.style.background = "";
     }
 };
 
 cameraSelect.onchange = async () => {
     currentDeviceId = cameraSelect.value;
-    await startCamera(currentDeviceId);
+
+    if (stream) {
+        await startCamera(currentDeviceId);
+    }
 };
+
 /* ===== GRABACIÓN ===== */
 let recStart, recTimer;
 
@@ -608,13 +634,6 @@ function moveGraph(e) {
     const r = canvas.getBoundingClientRect();
     const x = Math.min(Math.max(getEventX(e) - r.left, 0), r.width);
 
-    playVideo.currentTime = (x / r.width) * playVideo.duration;
-}
-function moveGraph(e){
-    if(!playVideo.duration) return;
-    autoFollow = false; // desactiva autoFollow al mover el gráfico
-    const r = canvas.getBoundingClientRect();
-    const x = Math.min(Math.max(e.clientX - r.left,0), r.width);
     playVideo.currentTime = (x / r.width) * playVideo.duration;
 }
 canvas.ondblclick = ()=>{ if(!playVideo.duration || !smoothDiffs.length) return; playVideo.currentTime = (peakIndex/smoothDiffs.length)*playVideo.duration; };
