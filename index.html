@@ -541,6 +541,8 @@ ctx.stroke();
 draw();
 
 /* ===== INTERACCIÓN GRAFICO ===== */
+let dragging = false; // ✅ declara esta variable
+
 canvas.onmousedown = e=>{ dragging=true; autoFollow=false; moveGraph(e); };
 window.onmousemove = e=>dragging && moveGraph(e);
 window.onmouseup = ()=>dragging=false;
