@@ -202,7 +202,8 @@ let devices = []; // lista de cámaras
 
 let stream = null; // ⬅️ Mover arriba
 let dragging = false;
-
+let liveStartTime = 0;
+let maxLiveDuration = 10000; // 10 segundos visibles en el gráfico
 
 /* ===== CRUCETA ===== */
 const crosshair = document.querySelector(".crosshair");
@@ -421,6 +422,7 @@ recorder.onstop = async () => {
     recorder.start();
     recording = true;
     recStart = performance.now();
+liveStartTime = performance.now();
     recTimeBox.style.display = "block";
     recTimer = setInterval(() => {
         recClock.textContent = formatTime(performance.now() - recStart);
@@ -543,10 +545,11 @@ function draw(){
 // barra naranja = tiempo actual del video
 let tx = 0;
 
-if (recording && smoothDiffs.length > 0) {
-    tx = (smoothDiffs.length - 1) / smoothDiffs.length * canvas.width;
-}
-else if (playVideo.duration) {
+if (recording) {
+    const elapsed = performance.now() - liveStartTime;
+    tx = (elapsed / maxLiveDuration) * canvas.width;
+    if (tx > canvas.width) tx = canvas.width;
+} else if (playVideo.duration) {
     tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
 }
 ctx.strokeStyle = "orange";
