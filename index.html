@@ -522,43 +522,51 @@ function recomputePeak(){
 }
 
 /* ===== GRAFICO ===== */
-function draw(){
+function draw() {
     requestAnimationFrame(draw);
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    if(!smoothDiffs.length) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!smoothDiffs.length) return;
     const h = canvas.height;
 
-    // curva azul
+    // ===== CURVA AZUL =====
     ctx.beginPath();
-    smoothDiffs.forEach((d,i)=>{
-        const x=i/smoothDiffs.length*canvas.width;
-        const y=h-(Math.pow(d,sensitivity)/maxDiff)*h;
-        ctx.lineTo(x,y);
+    smoothDiffs.forEach((d, i) => {
+        const x = i / smoothDiffs.length * canvas.width;
+        const y = h - (Math.pow(d, sensitivity) / maxDiff) * h;
+        ctx.lineTo(x, y);
     });
-    ctx.strokeStyle="#007bff"; ctx.lineWidth=3; ctx.stroke();
+    ctx.strokeStyle = "#007bff";
+    ctx.lineWidth = 3;
+    ctx.stroke();
 
-    // barra roja = pico
+    // ===== BARRA ROJA = PICO =====
     const px = peakIndex / smoothDiffs.length * canvas.width;
-    ctx.strokeStyle="red"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,h); ctx.stroke();
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, h);
+    ctx.stroke();
 
-// barra naranja = tiempo actual del video
-let tx = 0;
+    // ===== BARRA NARANJA = TIEMPO ACTUAL =====
+    let tx = 0;
 
-if (recording) {
-    const elapsed = performance.now() - liveStartTime;
-    tx = (elapsed / maxLiveDuration) * canvas.width;
-    if (tx > canvas.width) tx = canvas.width;
-} else if (playVideo.duration) {
-    tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
-}
-ctx.strokeStyle = "orange";
-ctx.lineWidth = 2;
-ctx.beginPath();
-ctx.moveTo(tx, 0);
-ctx.lineTo(tx, h);
-ctx.stroke();
+    if (recording && smoothDiffs.length) {
+        // La barra naranja avanza según la cantidad de muestras procesadas
+        tx = (smoothDiffs.length / (maxLiveDuration / sampleInterval)) * canvas.width;
+        if (tx > canvas.width) tx = canvas.width; // limitar al canvas
+    } else if (playVideo.duration) {
+        // Reproducción de video
+        tx = (playVideo.currentTime / playVideo.duration) * canvas.width;
+    }
 
+    ctx.strokeStyle = "orange";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(tx, 0);
+    ctx.lineTo(tx, h);
+    ctx.stroke();
 }
 draw();
 
